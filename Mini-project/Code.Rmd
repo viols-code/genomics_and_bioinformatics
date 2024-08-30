@@ -1,0 +1,335 @@
+---
+title: "Reproduction of figures Ex. 4a-b from \"GCN2 kinase activation by ATP-competitive kinase inhibitors\""
+author: Viola Renne
+output: html_document
+date: "2024-06-07"
+---
+
+```{r setup, include=FALSE}
+# Loading ggbiplot library
+if (!requireNamespace("ggbiplot", quietly = TRUE)) {
+  install.packages("ggbiplot")
+}
+library("ggbiplot")
+
+# Loading biomaRt library
+if (!requireNamespace("biomaRt", quietly = TRUE)) {
+  install.packages("biomaRt")
+}
+library("biomaRt")
+
+# Loading ggplot2 library
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  install.packages("ggplot2")
+}
+library("ggplot2")
+
+# Loading ggrepel library
+if (!requireNamespace("ggrepel", quietly = TRUE)) {
+  install.packages("ggrepel")
+}
+library("ggrepel")
+
+# Loading dplyr library
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  install.packages("dplyr")
+}
+library("dplyr")
+
+# Loading DESeq2 library
+if (!requireNamespace("DESeq2", quietly = TRUE)) {
+  install.packages("DESeq2")
+}
+library("DESeq2")
+
+# Loading limma library
+if (!requireNamespace("limma", quietly = TRUE)) {
+  install.packages("limma")
+}
+library("limma")
+
+# Loading edgeR library
+if (!requireNamespace("edgeR", quietly = TRUE)) {
+  install.packages("edgeR")
+}
+library("edgeR")
+
+# Loading pheatmap library
+if (!requireNamespace("pheatmap", quietly = TRUE)) {
+  install.packages("pheatmap")
+}
+library("pheatmap")
+
+# Loading grid library
+if (!requireNamespace("grid", quietly = TRUE)) {
+  install.packages("grid")
+}
+library("grid")
+
+# Loading ggplotify library
+if (!requireNamespace("ggplotify", quietly = TRUE)) {
+  install.packages("ggplotify")
+}
+library("ggplotify")
+```
+
+
+```{r DESeq2_pipeline}
+
+# This function has been slightly modified from the code available at https://github.com/cot2005/Tang_et_al_2021
+
+# Function to compute DESeq2 analysis
+RNApipeline.DESeq2<-function(tempRNAdata, conditions, geneKey, levels) {
+  # Define levels for time
+  conditions$time <- factor(conditions$time, levels=levels)
+  # Create an object of class DESeqDataSet
+  dds <- DESeq2::DESeqDataSetFromMatrix(countData = tempRNAdata, colData = conditions, design = ~ time)
+
+  # Pre-filtering removes low count features of < 10 reads for a row of a feature
+  # Select rows where the count is greater or equal to 10
+  keep <- rowSums(counts(dds)) >= 10
+  # Maintain only the selected rows
+  dds <- dds[keep,]
+
+  # Factor leveling
+  dds$time <- factor(dds$time, levels = c(levels))
+  # Differential expression calculation
+  # Run the function DESeq(), which will compute the following:
+  # 1. Estimating size factors
+  # 2. Estimating dispersion
+  # 3. Gene-wise dispersion estimates
+  # 4. Mean-dispersion relationship
+  # 5. Final dispersion estimates
+  # 6. Fitting model and testing
+  dds <- DESeq(dds)
+
+  # Extract results
+  res <- results(dds)
+  # Contrast sets the numerator (second position) and the denominator (third position) for the log2FC
+  res <- results(dds, contrast=c("time", levels[2], levels[1]))
+  # Print a summary of the results
+  summary(res)
+  # Order the rows based on p_value columns
+  resOrdered <- res[order(res$pvalue),]
+  resOrdered <- data.frame(GeneID = rownames(resOrdered), GeneSymbol = geneKey[match(rownames(resOrdered), geneKey[,1]),2], resOrdered)
+  
+  # Return the ordered results
+  return(resOrdered)
+}
+
+```
+
+
+```{r vocalno_plot}
+# This function has been slightly modified from the code available at https://github.com/cot2005/Tang_et_al_2021
+
+# Function to plot volcano plots
+RNApipeline.volcano.plot<-function(datadf, alphavalue = 0.05, lfcLim = 1.5, topgenes = 10, genesetFile = NULL, graphname = "volcano_", xlimsPercentile = 0.001, ylimsPercentile = 0.001, width = 6, height = 6, up_l = 40, modifications = TRUE) {
+  
+  # GeneSymbol converted into character format
+  datadf$GeneSymbol <- as.character(datadf$GeneSymbol)
+  # Compute the adjusted p-values using Benjamini-Hochberg adjustment
+  datadf$padj <- p.adjust(datadf$pvalue, method = "BH")
+  # Remove rows that contains NAs
+  datadf <- na.omit(datadf)
+  
+  # Add significance columns
+  # Genes have been divided into Sig_Upregulated, Sig_Downregulated and Not_Sig
+  input <- mutate(datadf, 
+                  sig = case_when(
+                    datadf$padj < alphavalue & datadf$log2FoldChange >= lfcLim ~ "Sig_Upregulated",
+                    datadf$padj < alphavalue & datadf$log2FoldChange <= -lfcLim ~ "Sig_Downregulated",
+                    .default = "Not_Sig"
+                ))
+  
+  # Set a label column to empty
+  input$label <- ""
+  top_genes <- c()
+  
+  # Set values in the label column
+  if (is.null(genesetFile) == F) {  # Set the labels only for genes provided in genesetFile
+    geneset <- read.table(genesetFile, header = T, stringsAsFactors = F)
+    geneset$rownum <- match(geneset[,1], datadf$GeneSymbol)
+    geneset <- na.omit(geneset)
+    input[geneset[,2],length(input)] <- as.character(geneset[,1])
+  } else if (topgenes > 0 && is.null(genesetFile) == T) { # Set the labels for topgenes upregulated and dowregulated
+    # Find the indices of genes with significant adjusted p-value
+    filtered_indices <- which(input[, 'padj'] < alphavalue)
+    # Order these genes based on log2FoldChange column
+    ordered_indices <- order(input[filtered_indices, 'log2FoldChange'])
+    # Get the 10 most upregulated and 10 most downregulated genes
+    top_10_upregulated = ordered_indices[1:topgenes]
+    top_10_downregulated = tail(ordered_indices, topgenes)
+    # Set the labels for these top 10 upregulated and downregulated genes
+    input$label[top_10_upregulated] <- input$GeneSymbol[top_10_upregulated]
+    input$label[top_10_downregulated] <- input$GeneSymbol[top_10_downregulated]
+    
+    # Extract row names using the indices
+    upregulated_genes <- datadf[top_10_upregulated, 'GeneID']
+    downregulated_genes <- datadf[top_10_downregulated, 'GeneID']
+    
+    # Combine and ensure uniqueness
+    top_genes <- c(upregulated_genes, downregulated_genes)
+  }
+  
+  # Determines x and y limits
+  # upperFDR <- ceiling(-log(quantile(input$padj, ylimsPercentile), 10))
+  upperlfc <- max(abs(ceiling(quantile(input$log2FoldChange, xlimsPercentile))), ceiling(quantile(input$log2FoldChange, (1 - xlimsPercentile))))
+  # Sets x and y limits
+  xlims <- c(-upperlfc, upperlfc)
+  # ylims <- c(0, upperFDR)
+  ylims <- c(0, up_l)
+
+  # Changes outliers to triangles
+  input$shape <- ifelse(-log10(input$padj) > ylims[2] | abs(input$log2FoldChange) > xlims[2], "triangle", "circle")
+  # Sets p_values and log2FC to the limits established
+  input$padj[-log10(input$padj) > ylims[2]] <- 10^-(ylims[2])
+  input$log2FoldChange[input$log2FoldChange > xlims[2]] <- xlims[2]
+  input$log2FoldChange[input$log2FoldChange < -xlims[2]] <- -xlims[2]
+
+  # Plots
+  # Volcanoplot with log2Foldchange versus pvalue
+  if (modifications){
+    colours = c("grey50","blue", "red")
+  }
+  else{
+    colours = c("grey50","red", "red")
+  }
+  v <- ggplot(input, aes(log2FoldChange, -log10(padj)))
+  v + geom_point(aes(col = sig, shape=shape)) + #add points colored by significance
+    scale_color_manual(values = colours) + xlim(xlims) + ylim(ylims) +
+    xlab("log2(fold change)") + ylab("-log10(FDR)") + ggtitle(graphname) + theme_bw() +
+    theme(legend.position = "none", axis.text = element_text(size=14), axis.title = element_text(size=16, face="bold")) + # ggtitle("Volcanoplot")
+    geom_text_repel(label = input$label, box.padding = 0.2, size = 4, force = 5, segment.size = 0.1, min.segment.length = 0.01, segment.alpha = 0.5, max.overlaps = 100000)
+  # Save the plot
+  ggsave(paste(graphname, "_Volcanoplot.pdf", sep = ""), width = width, height = height)
+  
+  return(top_genes)
+}
+
+```
+
+
+```{r main_code_volcano_plot}
+
+# This code has been modified starting from the code at https://github.com/cot2005/Tang_et_al_2021
+
+# Set paths
+file_path <- 'Data/SF268_neratinib_counts.csv'
+info_path <- 'Data/SF268_features.csv'
+
+# Read CSV files
+data <- read.csv(file_path, header = TRUE)
+info <- read.csv(info_path, header = TRUE)
+
+# Remove duplicated ENSGs
+# Checks for duplicated genes in the counts file and deletes the second entry if found.
+duplicatedGenes <- which(duplicated(data[,1]) == TRUE)
+if (length(duplicatedGenes) > 0) {
+  print("Duplicate ENSGs. Deleted entries:")
+  print(data[duplicatedGenes,1:2])
+  data <- data[-duplicatedGenes,]
+}
+
+# Makes rownames the unique ensembl gene ID
+rownames(data) <- data[,1]
+geneKey <- data[,1:2]
+
+# Set the conditions
+conditions <- matrix(c("0H", "0H", "6H", "72H"), nrow = 2, ncol = 2)
+# Set the height of the plot
+ylims <- c(40, 60)
+
+for (i in 1:nrow(conditions)) {
+  # Get condition from conditions matrix
+  condition <- conditions[i, ]
+  # Get treated and untreated
+  untreated <- condition[1]
+  treated <- condition[2]
+  
+  # Gets RNAdata columns for samples untreated (OH)
+  untreatedSamples <- info$sample[which(info$time == untreated)]
+  untreatedCols <- match(untreatedSamples, colnames(data))
+  
+  # Gets RNAdata columns for samples treated (6H or 72H)
+  treatedSamples <- info$sample[which(info$time == treated)]
+  treatedCols <- match(treatedSamples, colnames(data))
+  
+  # Creates a RNA data subset df for each condition
+  tempRNAdata <- as.matrix(subset(data, select = c(untreatedCols, treatedCols)))
+  
+  # Create info for DESeq2 analysis
+  new_info <- info[, c('sample', 'time')]
+  new_info <- new_info[match(colnames(tempRNAdata), info$sample),]
+  colnames(new_info) <- c("sample", "time")
+  
+  # Run DESeq2 analysis  
+  RNAlfc <- RNApipeline.DESeq2(tempRNAdata, new_info, geneKey, levels = c(untreated, treated))
+
+  # Save log2FC rank for GSEA software 
+  write.table(RNAlfc, paste(treated, ".txt", sep = ""), sep = "\t", col.names = T, row.names = F, quote = F)
+  write.table(subset(RNAlfc, select = c(2,4)), paste(treated, "_GSEA.rnk", sep = ""), sep = "\t", col.names = F, row.names = F, quote = F)
+  
+  # Volcano plot
+  significant_genes <- RNApipeline.volcano.plot(RNAlfc, alphavalue = 0.05, genesetFile = NULL, graphname = paste(treated, "_modified", sep=""), topgenes = 10, up_l = ylims[i], modifications = TRUE)
+  
+  RNApipeline.volcano.plot(RNAlfc, alphavalue = 0.05, genesetFile = 'geneSet', graphname = treated, topgenes = 10, up_l = ylims[i], modifications = FALSE)
+}
+```
+
+
+```{r}
+# Reproduce the analysis since before we are considering only four samples at a time
+# Define levels for time
+conditions <- info[, c('sample', 'time')]
+levels = c('0H', '6H', '72H')
+conditions$time <- factor(conditions$time, levels = levels)
+# Create an object of class DESeqDataSet
+dds <- DESeq2::DESeqDataSetFromMatrix(countData = data[3:8], colData = conditions, design = ~ time)
+
+# Pre-filtering removes low count features of < 10 reads for a row of a feature
+# Select rows where the count is greater or equal to 10
+keep <- rowSums(counts(dds)) >= 10
+# Maintain only the selected rows
+dds <- dds[keep,]
+
+# Factor leveling
+dds$time <- factor(dds$time, levels = c(levels))
+# Differential expression calculation
+# Run the function DESeq(), which will compute the following:
+# 1. Estimating size factors
+# 2. Estimating dispersion
+# 3. Gene-wise dispersion estimates
+# 4. Mean-dispersion relationship
+# 5. Final dispersion estimates
+# 6. Fitting model and testing
+dds <- DESeq(dds)
+```
+
+
+```{r fig.height=10, fig.width=8}
+# Get normalize count data from dds object
+rlog_out <- assay(rlog(dds, blind = F))
+normalized <- t(apply(rlog_out, 1, scale))
+# Take the top 10 upregulated and downregulated genes
+filtered_normalized <- normalized[rownames(normalized) %in% significant_genes, ]
+
+# Set the names
+gene_symbols <- data[rownames(data) %in% significant_genes, 'GeneSymbol']
+rownames(filtered_normalized) <- gene_symbols
+colnames(filtered_normalized) <- colnames(data[3:8])
+
+# Plot euclidean distance
+heatmap <- pheatmap(filtered_normalized)
+ggplot <- as.ggplot(heatmap)
+# Export to PDF with desired width and height
+ggsave("Heatmap.pdf", ggplot, width = 8, height = 10)
+
+# Plot euclidean correlation
+heatmap <- pheatmap(filtered_normalized, clustering_distance_rows = 'correlation')
+ggplot <- as.ggplot(heatmap)
+# Export to PDF with desired width and height
+ggsave("Heatmap_correlation.pdf", ggplot, width = 8, height = 10)
+clustering_distance_rows
+```
+

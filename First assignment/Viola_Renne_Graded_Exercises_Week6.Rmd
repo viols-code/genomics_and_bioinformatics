@@ -1,0 +1,384 @@
+---
+title: "6. Graded problem class - population genetics and sequence evolution"
+date: 03/29/2024
+date-format: long
+format:
+  html:
+    embed-resources: true
+  pdf:
+    papersize: a4
+    fig-width: 6
+    fig-height: 4
+format-links: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Exercise 1 - Simulating experimental evolution with serial passage
+
+**Introduction:** In this exercise, we will simulate the evolution of a haploid and asexual population in an evolution experiment with serial passages.
+Let us consider a model with serial dilutions such that the population of initial size $K$ (bottleneck) undergoes deterministic exponential growth for a time $t$ and then $K$ individuals are selected randomly from the grown population to form the next bottleneck, and so on. We assume that there are two types of individuals, wild-types with fitness 1 and mutants with fitness $1+s$. These fitnesses represent deterministic growth rates.
+
+1. **Question:** Let us consider a given growth rate. Write the mutant fraction $x'$ after growth as a function of the mutant fraction $x$ before growth and of the parameters of the system. Assuming that $s=0.01$, $t=10$, $K=1000$ and $x=0.1$, compute the value of $x'$. Same question if all values are the same except that $s=0.2$. Compare the results obtained in these two cases.
+
+**Solution:**
+The formula is
+$$
+x' = \frac{x  e^{st}}{1 + x(e^{st} - 1)}
+$$
+If we introduce $\sigma = e^{st} − 1$, then we get:
+
+$$
+x' = \frac{(1 + \sigma)x}{1 + \sigma x}
+$$
+In both cases s is greater than 0, so the mutant is beneficial. Consequently, we expect the fraction of the mutant to increase after a time t.
+
+```{r}
+# This function calculates the mutant fraction after a given time t,
+# starting with an initial mutant fraction x, and assuming a division rate of (1 + s) for mutants.
+calculate_mutant_fraction <- function(s, t, x) {
+  return (x * exp(s * t) / (1 + x * (exp(s * t) - 1)))
+}
+```
+
+```{r}
+# First case
+s <- 0.01; t <- 10; K <- 1000; x <- 0.1
+x_prime <- calculate_mutant_fraction(s, t, x)
+```
+
+In the first case, $x' = 0.1094$
+
+```{r}
+# Second case
+s <- 0.2
+x_prime <- calculate_mutant_fraction(s, t, x)
+```
+
+In the second case, $x' = 0.4509$
+
+In the first case, with s being close to zero at 0.01, the increase of the mutant fraction is minimal. In the second case, where s is equal to 0.2, there is a noticeable increase in the mutant fraction.
+As s increases, the mutant type becomes more fit, resulting in a faster growth of the mutant fraction.
+
+2. **Question:** Let us consider a given dilution step, and let us call $k$ the number of mutants that are sampled to form the next bottleneck. What are the minimal and maximal values $k$ can take? What is the name of the probability distribution that $k$ follows? Write the formula for the probability $P(k)$ to obtain a given value of $k$.
+
+**Solution:** At each step the population starts from K, grows exponentially, and then at the dilution step K individuals are selected randomly. For this reason, the minimum number of mutant $k$ is 0 and the maximum is $K$. 
+$k$ follows a binomial distribution.
+$$P(k) = \binom{K}{k}  x'^k (1 - x')^{(K - k)} $$
+3. **Question:** What is different or similar between the model with serial passage we are focusing on now and the Wright-Fisher model?
+
+**Solution:** 
+The difference between this model (with serial dilution) and Wright-Fisher model is the growth phase. In this model we have a deterministic exponential growth with no death. This is modeled by the formula
+$x' = \frac{(1 + \sigma)x}{1 + \sigma x}$, where $\sigma = e^{st} - 1$ which resemble the formula in Wright-Fisher model except that we have $\sigma$ instead of s.
+The bottleneck is modeled with a binomial sampling as in the transfer of the Wright-Fisher model.
+Also the diffusion approximation is the same as in Wright-Fisher model (with $\sigma$ instead of s). If t=1 and K >> 1, $|\sigma| << 1$ and $|s|t << 1$, then the diffusion approximation is the same for both models.
+
+
+4. **Question:** What function can you use to sample the number $k$ of mutants that exist at the next bottleneck? Using this function, perform sampling assuming that $s=0.01$, $t=10$, $K=1000$ and $x=0.1$. Sample $n=1000$ different values of $k$, compute their mean and standard deviation, and plot the histogram of the values obtained.
+
+**Solution:** The function that can be used is *rbinom*
+
+```{r}
+set.seed(42)  # For reproducibility
+s <- 0.01; t <- 10; K <- 1000; x <- 0.1; n <- 1000
+
+# Compute x'
+x_prime <- calculate_mutant_fraction(s, t, x)
+prob <- x_prime
+
+# Perform sampling
+vals <- rbinom(n, K, prob)
+
+# Compute the mean
+mean(vals)
+# Compute the standard deviation
+sd(vals)
+```
+
+```{r}
+# Plot the histogram
+h1 = hist(vals, main='', xlab='Number of successes')
+```
+
+5. **Question:** Simulate the serial passage model described above with $s=0.01$, $t=10$, $K=1000$, starting with 1 mutant at the initial bottleneck (bottleneck number 1) for 150 bottlenecks. Plot the fraction of mutants in the population versus the number of generations in 100 different realizations on the same plot. Comment: what are the long-term outcomes of these trajectories?
+
+**Solution:** 
+```{r}
+set.seed(42)
+s <- 0.01; t <- 10; K <- 1000; n_gen <- 150; mutants_ini <- 1; n_rep <- 100
+
+# Create an array for fraction of mutants in different generations and in different realizations
+mutant_frac <- matrix(nrow=n_gen, ncol=n_rep)
+
+# For each realization
+for(i in 1:n_rep){
+  # Start with one mutant out of K individuals
+  mutant_frac[1,i] <- mutants_ini / K
+  # For each bottleneck
+  for(j in 2:n_gen){
+    # Get the mutant fraction at time t=0
+    x <- mutant_frac[j-1, i]
+    # Exponential growth
+    x_prime <- calculate_mutant_fraction(s, t, x)
+    # Binomial Sampling
+    mutant_frac[j, i] <- rbinom(1, K, x_prime) / K
+  }
+}
+
+# Plot the generations
+matplot(1:n_gen, mutant_frac, pch=20, type="l", lty="solid", main='Model', xlab='Generation', ylab='Mutant fraction')
+```
+
+After a sufficient time, the mutant fraction reaches either 0 or 1 and stabilizes at that value. Thus corresponds to extinction or fixation of the mutant. Since K >> 1, $|\sigma| << 1$ and $|s|t << 1$, the probability of fixation starting from one mutant is equal to the one from Wright-Fisher model, but with $\sigma$ instead of s.
+In particular, $\sigma = e^{st} − 1 = e^{0.01*10} - 1 = 0.10517$
+and $p(1/K) = \frac{1 - e^{-2\sigma}}{1 - e^{-2K\sigma}} = 0.1898$.
+
+```{r}
+# Compute the number of realizations that end with fixation
+sum <- 0
+sum <- sum(sapply(mutant_frac[n_gen, ], function(x) x == 1))
+
+# Print the fraction of realizations with fixation
+sum / n_rep
+```
+
+It is possible to see that 0.17 is close to 0.1898. 
+
+##  Exercise 2 - Mutations in the flu virus
+
+**Introduction:** The file HA_sequences.fasta contains a list of nucleotide sequences of the gene coding for hemagluttinin (HA), from influenza viruses sampled between 1968 and 2005. In the fasta format, each sequence comes with a *header* that contains annotations: here, the header contains the year of sampling.
+
+1. **Question:** Load the sequences and inspect the data. In R, you may use the *seqinr::read.fasta* function for this, part of the *seqinr* package. How many sequences are there? What is the length of each sequence? 
+
+**Solution:**
+```{r}
+library(seqinr)
+# Read the file
+sequences = read.fasta("HA_sequences.fasta", whole.header=TRUE) 
+
+# Compute the number of sequences
+num_sequences <- length(sequences)
+# Print the number of sequence
+print(num_sequences)
+
+# Get the length of all sequences and then find unique lengths
+sequence_length <- unique(getLength(sequences))
+# Print the length of sequences
+print(sequence_length)
+```
+
+The number of sequences is 841.
+All sequences have the same length, which is 1694.
+
+2. **Question:** Calculate the Hamming distance between the first sequence (A/Aichi/2/1968) and each of the other sequences. In R, you may use the *DescTools::StrDist* function for this, part of the *DescTools* package.
+Also calculate the Jukes-Cantor distance between the first sequence (A/Aichi/2/1968) and each of the other sequences. Plot both of them versus the sampling year. 
+Comment: what is the trend of these distances? What fraction of the HA gene has changed due to mutations during this 37 year period? How many mutations per site on average does this correspond to?  
+
+**Solution:**
+```{r}
+library(DescTools)
+
+# Create an vector for Hamming distances
+hamming_distances <- numeric(num_sequences - 1)
+
+# Compute the Hamming distance between the first sequence and all the other sequences
+hamming_distances <- sapply(2:num_sequences, function(j) {
+  StrDist(sequences[[1]], sequences[[j]], method = "hamming", mismatch = 1, gap = 1, ignore.case = FALSE) / sequence_length
+})
+
+```
+
+To compute the Jukes-Cantor distances it is possible to use the following formula:
+$$d_{JC} = -\frac{3}{4} log(1 - \frac{4}{3} d_H)$$ 
+
+```{r}
+# Create an vector for Jukes-Cantor distances
+jukes_cantor_distances <- numeric(num_sequences - 1)
+
+# Compute Jukes-Cantor distance between the first sequence and all the other sequences
+jukes_cantor_distances <- sapply(1:(num_sequences - 1), function(j) {
+  -3/4 * log(1 - 4/3 * hamming_distances[j])
+})
+```
+
+
+```{r}
+library(stringr)
+
+# Obtain the header of each sequence
+headers <- names(sequences)
+# Create a vectors for the years
+years <- numeric(num_sequences)
+
+# Extract the year for each sequence
+years <- sapply(1:(num_sequences), function(j) {
+  as.integer(str_sub(headers[j], -4, -1))
+})
+```
+
+
+```{r}
+# Plot Hamming distances
+plot(years[2:num_sequences], hamming_distances, 
+     main = "Hamming distances",
+     xlab = "Sampling year",
+     ylab = "Hamming distance",
+     col = "red",
+     pch = 20
+     )
+```
+
+```{r}
+# Plot Jukes-Cantor distances
+plot(years[2:num_sequences], jukes_cantor_distances, 
+     main = "Jukes-Cantor distances",
+     xlab = "Sampling year",
+     ylab = "Jukes-Cantor distance",
+     col = "red",
+     pch = 20
+     )
+```
+
+```{r}
+# Create an empty plot with appropriate ranges
+plot(range(years[2:num_sequences]), range(c(hamming_distances, jukes_cantor_distances)),
+     type = "n",
+     main = "Hamming and Jukes-Cantor distances",
+     xlab = "Sampling year",
+     ylab = "Distance",
+     col = "black"
+)
+
+# Add points for Hamming distances
+points(years[2:num_sequences], hamming_distances, col = "red", pch = 20, 
+       main = "Hamming and Jukes-Cantor distances",
+       xlab = "Sampling year",
+       ylab = "Distance"
+)
+
+# Add points for Jukes-Cantor distances
+points(years[2:num_sequences], jukes_cantor_distances, col = "blue", pch = 20)
+
+# Add a legend
+legend("topleft", legend = c("Hamming distances", "Jukes-Cantor distances"), 
+       col = c("red", "blue"), pch = 20, bty = "n")
+```
+
+The distance between the first sequence and all other sequences tends to increase as the years pass. This trend is expected, given that the first sequence was sampled in 1968 and that, over time, mutations accumulate leading to a greater distance between the first sequence and the others.
+It is also possible to see that Jukes-Cantor distances are greater than Hamming distances. This is because Hamming distances are an underestimation of evolutionary distances, as they don't consider multiple substitutions at the same site. Jukes-Cantor distance attempts to compensate for this.
+
+```{r}
+# Find the maximum Hamming distance
+max(hamming_distances)
+```
+
+The fraction of the HA gene that has changed due to mutations during this 37 years period is approximately 0.13 (13%). This is obtained from the Hamming distances observed in sequences sampled in the most recent year (2006). In this case, Hamming distance is used because it quantifies the number of nucleotide changes between the initial sequence (1968) and sequences from the most recent year (2006).
+
+```{r}
+# Find the maximum Jukes-Cantor distance
+max(jukes_cantor_distances)
+```
+
+The mutations per site during 37-year period are approximately 0.14. This is obtained from the Jukes-Cantor distances observed in sequences sampled in the most recent year (2006). In this second case, Jukes-Cantor distance is used to account for potential multiple substitutions at the same site. 
+The result is reasonable because all sampled sequences are from the same gene. Therefore, we would expect not many changes to maintain its function, but considering it's the influenza virus, we also expect more mutations than other organisms.
+
+3. **Question:** If you wanted to construct a phylogenetic tree from the sequences considered here, do you think that the UPGMA method would give a reasonable result? Justify your answer. You do not need to construct a tree.
+
+**Solution:** The UPGMA algorithm finds the correct topology under two primary assumption. Firstly, it assumes that all leaves have the same distance from the root. Secondly, it assumes that all species evolve at the same rate.
+The second assumption seems valid, as suggested by the distances observed in question 2, which shows a linear correlation between distance and year, implying a constant rate. 
+The first assumption needs to be true, because when two clusters are joined, UPGMA algorithm labels each of the two new edges (each starting from a different child node and converging to the same intermediate node) with the distance between the two clusters divided by two minus the distance between the child node and the leaf (in this way, the sum edges' distances from the leaf to that intermediate node should be the distance between the two clusters divided by two for each chosen path). This results in all leaves having the same distance from the root. In this case, this assumption is not valid, because sequences are sampled from different years. This results in different distances from the root. In particular, I would expect more recent sequences have originated from less recent sequences, implying that some of sampled sequences (less recent ones) should be positioned in the intermediate nodes of the tree. Assuming that all sampled sequences occupy the leaf nodes would be inaccurate. Consequently, UPGMA would not give a reasonable result.
+
+
+4. **Question:** Calculate the Hamming distances between each pair of strains from the same year. Do this for all years, obtaining a list of Hamming distances between strains from the same year. (This calculation takes some time.) Plot the distribution of all these distances in a single histogram (including the data corresponding to all years). Calculate the mean and the maximum value of these distances. Comment: compare to the results from question 2.
+
+**Solution:**
+```{r}
+# Find unique years
+unique_years <- unique(years)
+# Create a vector for distances
+distances <- vector("numeric", length = 0)
+sampled_years <- vector("numeric", length = 0)
+
+# For every sequence except the last one
+for(i in 1:(num_sequences-1)){
+  # For every of the remaining sequences 
+  for(j in (i+1):num_sequences){
+    # Check if the year is the same
+    if(years[j] == years[i]){
+      distance <- StrDist(sequences[[i]], sequences[[j]], method = "hamming", mismatch = 1, gap = 1, ignore.case = FALSE) / sequence_length
+      distances <- c(distances, distance)
+      sampled_years <- c(sampled_years, years[i])
+    }
+  }
+}
+
+# Plot the histogram
+hist(distances, main='Distances between strains of the same year', xlab='Distances')
+```
+
+```{r}
+# Find the mean
+mean(distances)
+# Find the max
+max(distances)
+```
+```{r}
+# Find the mean
+mean(hamming_distances)
+# Find the max
+max(hamming_distances)
+```
+
+In question 2, both the mean and maximum distances (respectively 0.1041 and 0.1311) are higher compared to this question (respectively 0.00786 and 0.0401). In point 2, we are comparing the first sequence (from year 1968) with all other sequences from different years (from 1968 to 2006). In contrast, in this question, we are comparing sequences from the same year. This means that, even if mutations accumulate over time, sequences tend to remain similar. This may be explained by natural selection.
+
+```{r}
+# Plot Hamming distances between strains from the same year
+plot(sampled_years, distances, 
+     main = "Hamming distances between strains from the same year",
+     xlab = "Sampling year",
+     ylab = "Hamming distances",
+     col = "red",
+     pch = 20
+     )
+```
+
+5. **Question:** Focusing on Hamming distances for simplicity, estimate how long it would take for sequences to accumulate a number of differences corresponding to the average distance between sequences from the same year.
+
+**Solution:**
+
+As Hamming distances show a linear trend, it is possible to determine the line of best fit using least squares. The slope of this line would represent the rate of mutations per year. By dividing the average distance between sequences from the same year by this rate, we obtain an estimate of the time.
+
+```{r}
+# Compute linear regression
+model <- lm(hamming_distances ~ years[2:num_sequences])
+# Print the summary of the model
+summary(model)
+
+# Extract the coefficients of the model
+coefficients <- coefficients(model)
+```
+```{r}
+# Plot Hamming distances and line of best fit
+plot(years[2:length(years)], hamming_distances,
+     main = "Hamming distances and line of best fit",
+     xlab = "Sampling year",
+     ylab = "Hamming distance",
+     col = "red",
+     pch = 20
+     )
+
+abline(a = coefficients[1], b = coefficients[2], col = "green", lwd = 2)
+```
+
+```{r}
+# Select the slope
+slope <- coefficients[2]
+# Find the average of the distances obtained at point 4
+average <- mean(distances)
+# Print the result
+average/slope
+```
+
+The estimate of how long it would take for sequences to accumulate a number of differences corresponding to the average distance between sequences from the same year is 2.58 years.
